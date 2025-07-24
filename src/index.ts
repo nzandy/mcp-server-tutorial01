@@ -35,6 +35,14 @@ const tools = [
         name: "getDrinkNames",
         description: "Get the names of all available drinks in the shop",
         inputSchema: {type: "object", properties: {}},
+        execute: async (args: any) => {
+            return {
+                content: [{
+                    type: "text",
+                    text: JSON.stringify({names: drinks.map((drink) => drink.name)})
+                }]
+            }
+        }
     },
     {
         name: "getDrinkDetails",
@@ -46,8 +54,36 @@ const tools = [
                     type: "string", 
                     description: "The name of the drink to get details for"
                 }}},
+        execute: async (args: any) => {
+            const drink = drinks.find((drink) => drink.name === args.drinkName);
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: JSON.stringify(drink || {error: "Drink not found"}),
+                    }
+                ]
+            }
+        }
     },
 ]
+
+const resources = [
+    {
+        uri: "menu://app",
+        name: "Menu",
+        get: async () => {
+            return {
+                contents: [
+                    {
+                        uri: "menu://app",
+                        text: JSON.stringify(drinks),
+                    },
+                ],
+            };
+        },
+    },
+];
 
 const rl = readline.createInterface({
     input: stdin, 
@@ -73,6 +109,7 @@ function sendResponse(id: number, result: object){
                         protocolVersion: "2025-03-26",
                         capabilities: {
                             tools: {listChanged: true},
+                            resources: {listChanged: true},
                         },
                         serverInfo,
                     });
@@ -86,12 +123,49 @@ function sendResponse(id: number, result: object){
                         })),
                     });
                 }
+                if (json.method === "tools/call"){
+                    const tool = tools.find((tool) => tool.name === json.params.name);
+                    if (tool){
+                        const toolResponse = await tool.execute(json.params.arguments);
+                        sendResponse(json.id, toolResponse);
+                    } else{
+                        sendResponse(json.id, {
+                            error: {
+                                code: -32602,
+                                message: `MCP error -32602: Tool ${json.params.name} not found`
+                            }
+                        })
+                    }
+                }
+                if (json.method === "resources/list"){
+                    sendResponse(json.id, {
+                        resources: resources.map((resource) => ({
+                            uri: resource.uri,
+                            name: resource.name
+                        })),
+                    });
+                }
+                if (json.method === "resources/read"){
+                    const uri = json.params.uri;
+                    const resource = resources.find((resource) => resource.uri === uri);
+                    if (resource){
+                        sendResponse(json.id, await resource.get());
+                    } else {
+                        sendResponse(json.id, {
+                            error: {
+                                code: -32602,
+                                message: `MCP error -32602: Resource ${uri} not found`
+                            }
+                        });
+                    }
+                }
+                if (json.method === "ping"){
+                    sendResponse(json.id, {});
+                }
             }
         } catch (error){
             console.error(`Error parsing JSON: ${error}`);
             continue;
         }
-
-        console.log(`Received: ${line}`);
     }
 })();
